@@ -348,18 +348,8 @@ mcmcplot(out.sprfat)
 plot(out.sprfat$mean$predicted, out.sprfat$residual,
      main = "Residuals v. Predicted Values", xlab="Predicted Values", ylab="Residual Values")
 
-## 
-spr.fat.repeatability <- out.sprfat$sims.list$delta.var/(out.sprfat$sims.list$delta.var + out.sprfat$sims.list$epsilon.var)
-mean(spr.fat.repeatability)
-median(spr.fat.repeatability)
 
-
-hist(spr.fat.repeatability, breaks=400,
-     main ="", xlab = "Repeatability Estimate for Spring Fat",
-     ylab = "Frequency", bty="l")
-
-
-####### Spring Mass ####### 
+####### Spring Lean Mass ####### 
 
 print(out.sprmass, digits = 4) ## this is the output from the model
 out.sprmass.summary <- out.sprmass$summary ##save it as an object so you can write it to your computer later
@@ -371,17 +361,8 @@ mcmcplot(out.sprmass)
 plot(out.sprmass$mean$predicted, out.sprmass$residual,
      main = "Residuals v. Predicted Values", xlab="Predicted Values", ylab="Residual Values")
 
-spr.mass.repeatability <- out.sprmass$sims.list$delta.var/(out.sprmass$sims.list$delta.var + out.sprmass$sims.list$epsilon.var)
-mean(spr.mass.repeatability)
 
-
-## 
-
-hist(spr.mass.repeatability, breaks= 40,
-     main ="", xlab = "Repeatability Estimate for Spring Mass",
-     ylab = "Frequency", bty="l")
-
-####### Spring Weight ####### 
+####### Spring Body Mass ####### 
 
 print(out.sprweight, digits = 3) ## this is the output from the model
 out.sprweight.summary <- out.sprweight$summary ##save it as an object so you can write it to your computer later
@@ -393,14 +374,6 @@ out.sprweight.summary <- out.sprweight$summary ##save it as an object so you can
 plot(out.sprweight$mean$predicted, out.sprweight$residual,
      main = "Residuals v. Predicted Values", xlab="Predicted Values", ylab="Residual Values")
 
-out.sprweight.repeatability <- out.sprweight$sims.list$delta.var/(out.sprweight$sims.list$delta.var + out.sprweight$sims.list$epsilon.var)
-mean(out.sprweight.repeatability)
-
-## 
-
-hist(out.sprweight.repeatability, breaks=35,
-     main ="", xlab = "Repeatability Estimate for Spring Neight Weight",
-     ylab = "Frequency", bty="l")
 
 ####### Autumn Fat ####### 
 
@@ -414,19 +387,9 @@ mcmcplot(out.autfat)
 plot(out.autfat$mean$predicted, out.autfat$residual,
      main = "Residuals v. Predicted Values", xlab="Predicted Values", ylab="Residual Values")
 
-aut.fat.repeatability <- out.autfat$sims.list$delta.var/(out.autfat$sims.list$delta.var + out.autfat$sims.list$epsilon.var)
-mean(aut.fat.repeatability)
-
-## 
-
-hist(aut.fat.repeatability, breaks=30,
-     main ="", xlab = "Repeatability Estimate for Autumn Fat",
-     ylab = "Frequency", bty="l")
 
 
-
-
-####### Autumn Mass ####### 
+####### Autumn Lean Mass ####### 
 
 print(out.autmass, digits = 3) ## this is the output from the model
 out.autmass.summary <- out.autfat$summary ##save it as an object so you can write it to your computer later
@@ -438,18 +401,8 @@ mcmcplot(out.autmass)
 plot(out.autmass$mean$predicted, out.autmass$residual,
      main = "Residuals v. Predicted Values", xlab="Predicted Values", ylab="Residual Values")
 
-aut.mass.repeatability <- out.autmass$sims.list$delta.var/(out.autmass$sims.list$delta.var + out.autmass$sims.list$epsilon.var)
-mean(aut.mass.repeatability)
 
-## 
-
-hist(aut.mass.repeatability, breaks=35,
-     main ="", xlab = "Repeatability Estimate for Autumn Mass",
-     ylab = "Frequency", bty="l")
-
-
-
-####### Autumn Weight ####### 
+####### Autumn Body Mass ####### 
 
 print(out.autweight, digits = 3) ## this is the output from the model
 out.autweight.summary <- out.autweight$summary ##save it as an object so you can write it to your computer later
@@ -461,35 +414,6 @@ mcmcplot(out.autweight)
 plot(out.autweight$mean$predicted, out.autweight$residual,
      main = "Residuals v. Predicted Values", xlab="Predicted Values", ylab="Residual Values")
 
-out.autweight.repeatability <- out.autweight$sims.list$delta.var/(out.autweight$sims.list$delta.var + out.autweight$sims.list$epsilon.var)
-mean(out.autweight.repeatability)
 
-## 
-
-hist(out.autweight.repeatability, breaks=35,
-     main ="", xlab = "Repeatability Estimate for Autumn Neight Weight",
-     ylab = "Frequency", bty="l")
-
-
-
-####### frequentist results
-# aut.fat.mod ## 0.231
-# aut.mass.mod ## 0.711 
-# spr.fat.mod ## 0.013
-# spr.mass.mod ## 0.603
-
-
-hist(out.sprfat$sims.list$delta.prec, breaks=1000,
-     main ="", xlab = "Delta Precision Distribution",
-     ylab = "Frequency", bty="l")
-
-
-min(out.sprfat$sims.list$delta.prec)
-max(out.sprfat$sims.list$delta.prec)
-median(out.sprfat$sims.list$delta.prec)
-mean(out.sprfat$sims.list$delta.prec)
-
-min(out.sprfat$sims.list$delta.var)
-min(out.sprfat$sims.list$epsilon.var)
 
 save(out.sprfat, out.autfat, out.sprmass, out.autmass, out.sprweight, out.autweight, file = "BayesianOutput.rds")
