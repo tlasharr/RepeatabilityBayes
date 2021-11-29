@@ -101,7 +101,6 @@ aut <- aut[,c("AID", "scaledIFBFat", "IFFFLeanMass", "Netweightkg", "id")]
 #############################################################
 
 ## set up the bayseian model
-## we are trying to model fat as a function of AID and a random intercept by AID
 
 sink("wrmd_fat.txt")
 
