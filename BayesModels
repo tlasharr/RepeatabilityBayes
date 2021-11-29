@@ -27,9 +27,7 @@ completeFun <- function(data, desiredCols) {
 #############################################################
 
 
-fat <- read.csv("H:/Shared drives/wyo-coop-lasharr/Collaborations/RepetabilityFat_Smiley/Analyses/fat_mass.csv", header = TRUE)
-setwd("H:/Shared drives/wyo-coop-lasharr/Collaborations/RepetabilityFat_Smiley/Analyses/BayesOutput")
-
+fat <- read.csv("H:/fat_mass.csv", header = TRUE)
 fat <- fat[fat$Herd %in% c("NorthWR", "SouthWR"),] ## pull out only the north and south WR and get rid of everything else
 
 
