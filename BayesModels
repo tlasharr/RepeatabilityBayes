@@ -1,0 +1,497 @@
+#############################################################
+#####                                                   #####
+#####            Repeatability in Bayes                 #####
+#####                 29 November 2021                  #####
+#####                 Code Written by:                  #####
+#####  Tim Robinson, Tayler LaSharr, and Rachel Smiley  #####
+#####             and with code provided in             #####
+#####             Marc Kery's WinBugs Book              #####
+#####                                                   #####
+#############################################################
+
+### read in necessary libraries and any general functions 
+
+library(R2WinBUGS)
+library(lme4)
+library(MASS)
+library(dplyr)
+library(mcmcplots)
+
+completeFun <- function(data, desiredCols) {
+  completeVec <- complete.cases(data[, desiredCols])
+  return(data[completeVec, ])
+}
+
+#############################################################
+#####      Read in Data and Remove Extra Crap           #####
+#############################################################
+
+
+fat <- read.csv("H:/Shared drives/wyo-coop-lasharr/Collaborations/RepetabilityFat_Smiley/Analyses/fat_mass.csv", header = TRUE)
+setwd("H:/Shared drives/wyo-coop-lasharr/Collaborations/RepetabilityFat_Smiley/Analyses/BayesOutput")
+
+fat <- fat[fat$Herd %in% c("NorthWR", "SouthWR"),] ## pull out only the north and south WR and get rid of everything else
+
+
+## scale and center the three biomakers
+variables <- c("scaledIFBFat", "Netweightkg", "IFFFLeanMass") 
+
+for(i in 1:length(variables)){
+  fat[,variables[i]] <- scale(fat[,variables[i]])
+  print(variables[i])
+  print(attributes(scale(fat[,variables[i]])))
+}
+
+fat$scaledIFBFat <- as.numeric(fat$scaledIFBFat)
+fat$Netweightkg <- as.numeric(fat$Netweightkg)
+fat$IFFFLeanMass <- as.numeric(fat$IFFFLeanMass)
+
+
+females <- fat[fat$Sex=="F",] ## only keep females
+females <- females[females$Age > 1.5,] ## only keep adults
+table(females$Age)
+
+aut <- females[females$Month==12,] ##pull out the december values
+spr <- females[females$Month==3,] ## pull out the march values
+
+
+#### autumn
+
+#take out animals with only one measurement of fat/weight
+a <- aut %>%
+  group_by(AID)%>%
+  summarise(n())
+
+autAID <- a$AID[a$`n()`>1]
+aut <- aut[aut$AID %in% autAID, ]
+aut <- aut[!is.na(aut$IFFFLeanMass), ]
+
+## for some reason, the bugs model won't run with a grouping variable that is not sequential and numeric, so changing that here
+ids_aut <- data.frame(AID=unique(aut$AID))
+ids_aut$id <- as.numeric(1:nrow(ids_aut))
+aut <- merge(aut, ids_aut, by="AID", all.x=TRUE)
+
+#### spring
+
+#take out animals with only one measurement of fat/weight
+b <- spr %>%
+  group_by(AID)%>%
+  summarise(n())
+
+sprAID <- b$AID[b$`n()`>1]
+spr <- spr[spr$AID %in% sprAID, ]
+spr <- spr[!is.na(spr$IFFFLeanMass), ]
+spr <- spr[!is.na(spr$scaledIFBFat), ]
+
+## making the sequential grouping variable
+ids_spr <- data.frame(AID=unique(spr$AID))
+ids_spr$id <- as.numeric(1:nrow(ids_spr))
+spr <- merge(spr, ids_spr, by="AID", all.x=TRUE)
+
+## make sure that there are no NAs
+
+spr <- completeFun(spr, "scaledIFBFat")
+aut <- completeFun(aut, "scaledIFBFat")
+
+spr <- spr[,c("AID", "scaledIFBFat", "IFFFLeanMass", "Netweightkg", "id")]
+aut <- aut[,c("AID", "scaledIFBFat", "IFFFLeanMass", "Netweightkg", "id")]
+
+
+
+#############################################################
+#####            Write the Bayesian Model               #####
+#############################################################
+
+## set up the bayseian model
+## we are trying to model fat as a function of AID and a random intercept by AID
+
+sink("wrmd_fat.txt")
+
+cat("
+    model {
+    
+    ## PRIORS
+
+    delta.sig ~ dunif(0,100)
+    epsilon.sig ~ dunif(0,100)
+    alpha ~ dnorm(0, 0.01) # intercept
+    
+    ## DERIVED VALUES FROM PRIORS
+
+    delta.var <- delta.sig*delta.sig
+    delta.prec <- 1 / delta.var #delta.prec is a random intercept precision
+    
+    epsilon.var <- epsilon.sig*epsilon.sig
+    epsilon.prec <- 1 / epsilon.var
+
+    repeatability <- delta.var/(delta.var + epsilon.var)
+
+    ## PRIOR FOR RANDOM EFFECT
+
+    for (j in 1:nids) {
+        delta[j] ~ dnorm(0,delta.prec) ## this gets a prior for the random intercepts
+    } 
+
+   
+
+    ## LIKELIHOOD
+    
+    for (i in 1:nobs) {	
+    
+        mu[i] <- alpha + delta[id[i]]
+        energy[i] ~ dnorm(mu[i], epsilon.prec)
+    
+        #normal mean is mu[i]
+
+    }
+
+    ## ASSESS MODEL FIT
+  
+    for(i in 1:nobs){
+
+      residual[i] <- energy[i] - mu[i]
+      predicted[i] <- mu[i]
+      sq[i] <- pow(residual[i], 2)
+
+      ##generate replicate data and compute fit 
+
+      energy.new[i] ~ dnorm(mu[i], epsilon.prec)
+      sq.new[i] <- pow(energy.new[i] - predicted[i], 2)
+
+    }
+    
+    fit <- sum(sq[])
+    fit.new <- sum(sq.new[])
+    test <- step(fit.new - fit)
+    b.pval <- mean(test)    
+    
+    }	 # end of model loop   
+    
+    ",fill=TRUE)
+
+sink()
+
+
+#############################################################
+#####         Initial Values & Parameters               #####
+#############################################################
+
+
+## give it the intial values to read into the model
+inits_aut <- function(){
+  list(alpha = rnorm(1, 0, 1), ## only need one value for this because it's the intercept
+       delta = rnorm(length(unique(aut$id)), 0 , 2), ## generates a value for each grouping variable (since we have a random intercept)
+       delta.sig=runif(1,1,30),
+       epsilon.sig=runif(1,1,30)
+  )}
+
+inits_spr <- function(){
+  list(alpha = rnorm(1, 0, 1), ## only need one value for this because it's the intercept
+       delta = rnorm(length(unique(spr$id)), 0 , 2), ## generates a value for each grouping variable (since we have a random intercept)
+       delta.sig=runif(1,1,30),
+       epsilon.sig=runif(1,1,30)
+  )}
+
+## there are all the parameters we want returned to us
+params <- c("repeatability", "alpha", "delta.sig", "epsilon.sig", "delta.var",
+            "epsilon.var", "delta.prec", "epsilon.prec", "fit", "fit.new", "b.pval", "residual", "predicted", "delta")
+
+#############################################################
+#####                Set MCMC Params                    #####
+#############################################################
+
+nc <- 3            #Number of chains
+ni <- 10000        #Number of draws from the posterior (for each chain)
+nb <- 1000          #Number of draws to discard as burn-in
+nt <- 10           #Thinning rate
+
+#############################################################
+#####           Set up the data for bugs                #####
+#############################################################
+
+## set up the data to run the four different things we care about (spring fat, spring mass, autumn fat, autumn mass)
+
+bugs_sprfat <- list(energy = spr$scaledIFBFat,
+                    id = spr$id,
+                    nids = length(unique(spr$id)),
+                    nobs=length(spr$scaledIFBFat))
+
+bugs_sprmass <- list(energy = spr$IFFFLeanMass,
+                    id = spr$id,
+                    nids = length(unique(spr$id)),
+                    nobs=length(spr$IFFFLeanMass))
+
+bugs_sprweight <- list(energy = spr$Netweightkg,
+                     id = spr$id,
+                     nids = length(unique(spr$id)),
+                     nobs=length(spr$Netweightkg))
+
+bugs_autfat <- list(energy = aut$scaledIFBFat,
+                    id = aut$id,
+                    nids = length(unique(aut$id)),
+                    nobs=length(aut$scaledIFBFat))
+
+bugs_autmass <- list(energy = aut$IFFFLeanMass,
+                    id = aut$id,
+                    nids = length(unique(aut$id)),
+                    nobs=length(aut$IFFFLeanMass))
+
+bugs_autweight <- list(energy = aut$Netweightkg,
+                       id = aut$id,
+                       nids = length(unique(aut$id)),
+                       nobs=length(aut$Netweightkg))
+
+
+
+#############################################################
+#####                 Run the models                    #####
+#############################################################
+
+## I was running into problems running all six of the models in the same R session.
+## if you get a "Incompatible Copy Trap" try clearing your environment and only 
+## reading in a single list in the 'set up data for bugs' section and then
+## only running the corresponding bugs function, that should fix the issue.
+
+## close the winbugs window after the model finishes running so that R can finish (otherwise will run forever!)
+
+out.sprfat <- bugs(data=bugs_sprfat,
+                   inits=inits_spr,
+                   parameters.to.save=params,
+                   model.file="wrmd_fat.txt",
+                   n.thin=nt,
+                   n.chains=nc,
+                   n.burnin=nb,
+                   n.iter=(ni*nt+nb),
+                   debug=TRUE,
+                   DIC=FALSE,
+                   bugs.directory = "C:/WinBUGS14",
+                   working.directory = "H:/Shared drives/wyo-coop-lasharr/Collaborations/RepetabilityFat_Smiley/Analyses/BayesOutput")
+
+out.sprmass <- bugs(data=bugs_sprmass,
+                    inits=inits_spr,
+                    parameters.to.save=params,
+                    model.file="wrmd_fat.txt",
+                    n.thin=nt,
+                    n.chains=nc,
+                    n.burnin=nb,
+                    n.iter=(ni*nt+nb),
+                    debug=TRUE,
+                    DIC=FALSE,
+                    bugs.directory = "C:/WinBUGS14",
+                    working.directory = "H:/Shared drives/wyo-coop-lasharr/Collaborations/RepetabilityFat_Smiley/Analyses/BayesOutput")
+
+out.sprweight <- bugs(data=bugs_sprweight,
+                      inits=inits_spr,
+                      parameters.to.save=params,
+                      model.file="wrmd_fat.txt",
+                      n.thin=nt,
+                      n.chains=nc,
+                      n.burnin=nb,
+                      n.iter=(ni*nt+nb),
+                      debug=TRUE,
+                      DIC=FALSE,
+                      bugs.directory = "C:/WinBUGS14",
+                      working.directory = "H:/Shared drives/wyo-coop-lasharr/Collaborations/RepetabilityFat_Smiley/Analyses/BayesOutput")
+
+
+out.autfat <- bugs(data=bugs_autfat,
+                   inits=inits_aut,
+                   parameters.to.save=params,
+                   model.file="wrmd_fat.txt",
+                   n.thin=nt,
+                   n.chains=nc,
+                   n.burnin=nb,
+                   n.iter=(ni*nt+nb),
+                   debug=TRUE,
+                   DIC=FALSE,
+                   bugs.directory = "C:/WinBUGS14",
+                   working.directory = "H:/Shared drives/wyo-coop-lasharr/Collaborations/RepetabilityFat_Smiley/Analyses/BayesOutput")
+
+out.autmass <- bugs(data=bugs_autmass,
+                    inits=inits_aut,
+                    parameters.to.save=params,
+                    model.file="wrmd_fat.txt",
+                    n.thin=nt,
+                    n.chains=nc,
+                    n.burnin=nb,
+                    n.iter=(ni*nt+nb),
+                    debug=TRUE,
+                    DIC=FALSE,
+                    bugs.directory = "C:/WinBUGS14",
+                    working.directory = "H:/Shared drives/wyo-coop-lasharr/Collaborations/RepetabilityFat_Smiley/Analyses/BayesOutput")
+
+out.autweight <- bugs(data=bugs_autweight,
+                      inits=inits_aut,
+                      parameters.to.save=params,
+                      model.file="wrmd_fat.txt",
+                      n.thin=nt,
+                      n.chains=nc,
+                      n.burnin=nb,
+                      n.iter=(ni*nt+nb),
+                      debug=TRUE,
+                      DIC=FALSE,
+                      bugs.directory = "C:/WinBUGS14",
+                      working.directory = "H:/Shared drives/wyo-coop-lasharr/Collaborations/RepetabilityFat_Smiley/Analyses/BayesOutput")
+
+
+#############################################################
+#####                 Look at Results!                  #####
+#############################################################
+
+####### Spring Fat ####### 
+
+print(out.sprfat, digits = 3) ## this is the output from the model
+out.sprfat.summary <- out.sprfat$summary ##save it as an object so you can write it to your computer later
+
+## this plots the traceplots and distribution, cool tool
+mcmcplot(out.sprfat)
+
+## let's look at model fit by assessing residual vs predicted values
+plot(out.sprfat$mean$predicted, out.sprfat$residual,
+     main = "Residuals v. Predicted Values", xlab="Predicted Values", ylab="Residual Values")
+
+## 
+spr.fat.repeatability <- out.sprfat$sims.list$delta.var/(out.sprfat$sims.list$delta.var + out.sprfat$sims.list$epsilon.var)
+mean(spr.fat.repeatability)
+median(spr.fat.repeatability)
+
+
+hist(spr.fat.repeatability, breaks=400,
+     main ="", xlab = "Repeatability Estimate for Spring Fat",
+     ylab = "Frequency", bty="l")
+
+
+####### Spring Mass ####### 
+
+print(out.sprmass, digits = 4) ## this is the output from the model
+out.sprmass.summary <- out.sprmass$summary ##save it as an object so you can write it to your computer later
+
+## this plots the traceplots and distribution, cool tool
+mcmcplot(out.sprmass)
+
+## let's look at model fit by assessing residual vs predicted values
+plot(out.sprmass$mean$predicted, out.sprmass$residual,
+     main = "Residuals v. Predicted Values", xlab="Predicted Values", ylab="Residual Values")
+
+spr.mass.repeatability <- out.sprmass$sims.list$delta.var/(out.sprmass$sims.list$delta.var + out.sprmass$sims.list$epsilon.var)
+mean(spr.mass.repeatability)
+
+
+## 
+
+hist(spr.mass.repeatability, breaks= 40,
+     main ="", xlab = "Repeatability Estimate for Spring Mass",
+     ylab = "Frequency", bty="l")
+
+####### Spring Weight ####### 
+
+print(out.sprweight, digits = 3) ## this is the output from the model
+out.sprweight.summary <- out.sprweight$summary ##save it as an object so you can write it to your computer later
+
+## this plots the traceplots and distribution, cool tool
+# mcmcplot(out.sprweight)
+
+## let's look at model fit by assessing residual vs predicted values
+plot(out.sprweight$mean$predicted, out.sprweight$residual,
+     main = "Residuals v. Predicted Values", xlab="Predicted Values", ylab="Residual Values")
+
+out.sprweight.repeatability <- out.sprweight$sims.list$delta.var/(out.sprweight$sims.list$delta.var + out.sprweight$sims.list$epsilon.var)
+mean(out.sprweight.repeatability)
+
+## 
+
+hist(out.sprweight.repeatability, breaks=35,
+     main ="", xlab = "Repeatability Estimate for Spring Neight Weight",
+     ylab = "Frequency", bty="l")
+
+####### Autumn Fat ####### 
+
+print(out.autfat, digits = 3) ## this is the output from the model
+out.autfat.summary <- out.autfat$summary ##save it as an object so you can write it to your computer later
+
+## this plots the traceplots and distribution, cool tool
+mcmcplot(out.autfat)
+
+## let's look at model fit by assessing residual vs predicted values
+plot(out.autfat$mean$predicted, out.autfat$residual,
+     main = "Residuals v. Predicted Values", xlab="Predicted Values", ylab="Residual Values")
+
+aut.fat.repeatability <- out.autfat$sims.list$delta.var/(out.autfat$sims.list$delta.var + out.autfat$sims.list$epsilon.var)
+mean(aut.fat.repeatability)
+
+## 
+
+hist(aut.fat.repeatability, breaks=30,
+     main ="", xlab = "Repeatability Estimate for Autumn Fat",
+     ylab = "Frequency", bty="l")
+
+
+
+
+####### Autumn Mass ####### 
+
+print(out.autmass, digits = 3) ## this is the output from the model
+out.autmass.summary <- out.autfat$summary ##save it as an object so you can write it to your computer later
+
+## this plots the traceplots and distribution, cool tool
+mcmcplot(out.autmass)
+
+## let's look at model fit by assessing residual vs predicted values
+plot(out.autmass$mean$predicted, out.autmass$residual,
+     main = "Residuals v. Predicted Values", xlab="Predicted Values", ylab="Residual Values")
+
+aut.mass.repeatability <- out.autmass$sims.list$delta.var/(out.autmass$sims.list$delta.var + out.autmass$sims.list$epsilon.var)
+mean(aut.mass.repeatability)
+
+## 
+
+hist(aut.mass.repeatability, breaks=35,
+     main ="", xlab = "Repeatability Estimate for Autumn Mass",
+     ylab = "Frequency", bty="l")
+
+
+
+####### Autumn Weight ####### 
+
+print(out.autweight, digits = 3) ## this is the output from the model
+out.autweight.summary <- out.autweight$summary ##save it as an object so you can write it to your computer later
+
+## this plots the traceplots and distribution, cool tool
+mcmcplot(out.autweight)
+
+## let's look at model fit by assessing residual vs predicted values
+plot(out.autweight$mean$predicted, out.autweight$residual,
+     main = "Residuals v. Predicted Values", xlab="Predicted Values", ylab="Residual Values")
+
+out.autweight.repeatability <- out.autweight$sims.list$delta.var/(out.autweight$sims.list$delta.var + out.autweight$sims.list$epsilon.var)
+mean(out.autweight.repeatability)
+
+## 
+
+hist(out.autweight.repeatability, breaks=35,
+     main ="", xlab = "Repeatability Estimate for Autumn Neight Weight",
+     ylab = "Frequency", bty="l")
+
+
+
+####### frequentist results
+# aut.fat.mod ## 0.231
+# aut.mass.mod ## 0.711 
+# spr.fat.mod ## 0.013
+# spr.mass.mod ## 0.603
+
+
+hist(out.sprfat$sims.list$delta.prec, breaks=1000,
+     main ="", xlab = "Delta Precision Distribution",
+     ylab = "Frequency", bty="l")
+
+
+min(out.sprfat$sims.list$delta.prec)
+max(out.sprfat$sims.list$delta.prec)
+median(out.sprfat$sims.list$delta.prec)
+mean(out.sprfat$sims.list$delta.prec)
+
+min(out.sprfat$sims.list$delta.var)
+min(out.sprfat$sims.list$epsilon.var)
+
+save(out.sprfat, out.autfat, out.sprmass, out.autmass, out.sprweight, out.autweight, file = "BayesianOutput.rds")
